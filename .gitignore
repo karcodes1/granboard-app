@@ -37,3 +37,6 @@ serviceAccountKey.json
 
 # Testing
 coverage/
+
+# Gcp key
+github-actions-key.json

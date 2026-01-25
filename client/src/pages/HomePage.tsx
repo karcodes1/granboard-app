@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
-import { Target, Users, Play, LogIn, UserPlus } from 'lucide-react';
+import { Target, Users, LogIn, UserPlus } from 'lucide-react';
 
 export function HomePage() {
   const navigate = useNavigate();
