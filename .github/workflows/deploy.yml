@@ -45,6 +45,9 @@ jobs:
       - name: Build Docker image
         run: |
           docker build -f server/Dockerfile -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/cloud-run-source-deploy/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          
+      - name: Show active gcloud account
+        run: gcloud auth list
 
       - name: Push Docker image
         run: |
