@@ -11,11 +11,37 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  
+  /* Prevent text selection on touch */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height for mobile */
+  overscroll-behavior: none;
+}
+
+/* Allow text selection in inputs */
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Safe area insets for notched devices */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
 }
 
 @layer components {
@@ -66,4 +92,76 @@ body {
   .dart-hit-bull {
     @apply bg-amber-600 text-white;
   }
+
+  /* Touch-friendly button sizing for mobile */
+  .btn-touch {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  /* Landscape mode optimizations */
+  @media (orientation: landscape) and (max-height: 500px) {
+    .landscape-compact {
+      @apply py-2;
+    }
+    .landscape-hide {
+      @apply hidden;
+    }
+    .landscape-smaller {
+      @apply text-sm;
+    }
+  }
+
+  /* Mobile-first card adjustments */
+  @media (max-width: 640px) {
+    .card {
+      @apply p-4 rounded-lg;
+    }
+    .dart-score {
+      @apply text-3xl;
+    }
+  }
+}
+
+/* Landscape game layout */
+@media (orientation: landscape) and (max-height: 500px) {
+  .game-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    align-items: start;
+  }
+  
+  .game-controls {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgb(31 41 55);
+    padding: 0.5rem 1rem;
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    border-top: 1px solid rgb(55 65 81);
+  }
+}
+
+/* Prevent zoom on input focus (iOS) */
+@media screen and (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Touch action improvements */
+button, a {
+  touch-action: manipulation;
+}
+
+/* Hide scrollbar but allow scrolling */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }

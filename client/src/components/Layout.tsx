@@ -1,13 +1,20 @@
-import { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { ReactNode, useRef, useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
-import { Target, Bluetooth, Wifi, WifiOff, LogOut, User } from 'lucide-react';
+import { Target, Bluetooth, Wifi, WifiOff, LogOut, User, Maximize, Minimize } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 export function Layout({ children }: LayoutProps) {
+  const location = useLocation();
+  const isGamePage = location.pathname === '/game';
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
+
   const {
     user,
     isConnected,
@@ -19,51 +26,131 @@ export function Layout({ children }: LayoutProps) {
     disconnectBle,
   } = useGameStore();
 
+  // Track header height for game page layout
+  useEffect(() => {
+    const updateHeaderHeight = () => {
+      if (headerRef.current) {
+        setHeaderHeight(headerRef.current.offsetHeight);
+      }
+    };
+    updateHeaderHeight();
+    window.addEventListener('resize', updateHeaderHeight);
+    return () => window.removeEventListener('resize', updateHeaderHeight);
+  }, []);
+
+  // Fullscreen API
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (err) {
+      console.warn('Fullscreen not supported:', err);
+    }
+  };
+
+  // Wake Lock API - prevent device from sleeping during game
+  useEffect(() => {
+    if (!isGamePage) {
+      // Release wake lock when leaving game page
+      wakeLock?.release();
+      setWakeLock(null);
+      return;
+    }
+
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator) {
+        try {
+          const lock = await navigator.wakeLock.request('screen');
+          setWakeLock(lock);
+          lock.addEventListener('release', () => setWakeLock(null));
+        } catch (err) {
+          console.warn('Wake Lock not available:', err);
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    // Re-acquire wake lock when page becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isGamePage) {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      wakeLock?.release();
+    };
+  }, [isGamePage]);
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      {/* Header */}
-      <header className="bg-gray-800 border-b border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 text-xl font-bold text-emerald-500">
-            <Target className="w-6 h-6" />
-            <span>Dart Game</span>
+    <div className="min-h-screen min-h-[100dvh] bg-gray-900 text-white flex flex-col">
+      {/* Header - compact on mobile */}
+      <header ref={headerRef} className="bg-gray-800 border-b border-gray-700 safe-top flex-shrink-0">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-1.5 sm:gap-2 text-lg sm:text-xl font-bold text-emerald-500">
+            <Target className="w-5 h-5 sm:w-6 sm:h-6" />
+            <span className="hidden xs:inline">Dart Game</span>
           </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             {/* Connection Status */}
-            <div className="flex items-center gap-3 text-sm">
+            <div className="flex items-center gap-2 sm:gap-3 text-sm">
               {/* Server Status */}
               <div className={`flex items-center gap-1 ${isConnected ? 'text-green-400' : 'text-gray-400'}`}>
                 {isConnected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
-                <span className="hidden sm:inline">{isConnected ? 'Connected' : 'Offline'}</span>
               </div>
 
               {/* BLE Status */}
               <button
                 onClick={isBleConnected ? disconnectBle : connectBle}
-                className={`flex items-center gap-1 px-2 py-1 rounded transition-colors ${
+                className={`flex items-center gap-1 px-2 py-1.5 rounded transition-colors min-h-[36px] ${
                   isBleConnected
                     ? 'bg-emerald-600 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
               >
                 <Bluetooth className="w-4 h-4" />
-                <span className="hidden sm:inline">
-                  {isBleConnected ? bleDeviceName || 'Board' : 'Connect Board'}
+                <span className="hidden sm:inline text-xs sm:text-sm">
+                  {isBleConnected ? bleDeviceName || 'Board' : 'Board'}
                 </span>
               </button>
+
+              {/* Fullscreen button - show on game page */}
+              {isGamePage && (
+                <button
+                  onClick={toggleFullscreen}
+                  className="p-1.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+                  title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                </button>
+              )}
             </div>
 
             {/* User Menu */}
             {user && (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 text-sm text-gray-300">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <div className="hidden sm:flex items-center gap-1 text-sm text-gray-300">
                   <User className="w-4 h-4" />
-                  <span className="hidden sm:inline">{serverDisplayName || user.email || 'Guest'}</span>
+                  <span className="hidden md:inline">{serverDisplayName || user.email || 'Guest'}</span>
                 </div>
                 <button
                   onClick={signOut}
-                  className="p-1.5 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+                  className="p-2 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center"
                   title="Sign Out"
                 >
                   <LogOut className="w-4 h-4" />
@@ -74,8 +161,13 @@ export function Layout({ children }: LayoutProps) {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      {/* Main Content - fills remaining space */}
+      <main
+        className={`flex-1 max-w-7xl w-full mx-auto safe-bottom ${
+          isGamePage ? 'overflow-hidden' : 'px-2 sm:px-4 py-4 sm:py-6 overflow-y-auto'
+        }`}
+        style={isGamePage ? { height: `calc(100dvh - ${headerHeight}px)` } : undefined}
+      >
         {children}
       </main>
     </div>

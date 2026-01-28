@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
-import { Target, Users, LogIn, UserPlus } from 'lucide-react';
+import { Target, Users, LogIn, UserPlus, LogOut, Plus, Bluetooth, BluetoothOff, User } from 'lucide-react';
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -11,10 +11,15 @@ export function HomePage() {
     registerWithEmail,
     signInWithEmail,
     signInAnonymously,
-    createLobby,
+    signOut,
     isAuthLoading,
     error,
     clearError,
+    isBleConnected,
+    isBleConnecting,
+    bleDeviceName,
+    connectBle,
+    disconnectBle,
   } = useGameStore();
 
   const [formMode, setFormMode] = useState<'signin' | 'register'>('signin');
@@ -23,12 +28,11 @@ export function HomePage() {
   const [displayName, setDisplayName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleCreateGame = (gameType: '501' | '301' | 'cricket' | 'tictactoe') => {
-    createLobby(gameType);
-    navigate('/lobby');
+  const handleCreateLobby = () => {
+    navigate('/lobby?create=true');
   };
 
-  const handleJoinGame = () => {
+  const handleBrowseLobbies = () => {
     navigate('/lobby');
   };
 
@@ -52,209 +56,199 @@ export function HomePage() {
     }
   };
 
+  // Auth screen - optimized for viewport fit
   if (!user) {
     return (
-      <div className="max-w-md mx-auto mt-20">
-        <div className="card text-center">
-          <Target className="w-16 h-16 mx-auto text-emerald-500 mb-4" />
-          <h1 className="text-3xl font-bold mb-2">Dart Game</h1>
-          <p className="text-gray-400 mb-8">
-            Real-time multiplayer darts with GranBoard support
-          </p>
-
-          {error && (
-            <div className="bg-red-900/50 text-red-300 px-4 py-2 rounded mb-4">
-              {error}
-              <button onClick={clearError} className="ml-2 underline">
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          <div className="space-y-3 text-left">
-            <div className="flex justify-center gap-3 text-sm text-gray-400">
-              <button
-                className={`uppercase tracking-wide font-semibold ${formMode === 'signin' ? 'text-emerald-400' : 'hover:text-gray-200'}`}
-                onClick={() => setFormMode('signin')}
-                type="button"
-              >
-                Sign In
-              </button>
-              <span>|</span>
-              <button
-                className={`uppercase tracking-wide font-semibold ${formMode === 'register' ? 'text-emerald-400' : 'hover:text-gray-200'}`}
-                onClick={() => setFormMode('register')}
-                type="button"
-              >
-                Register
-              </button>
+      <div className="h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md lg:max-w-2xl">
+          <div className="flex flex-col lg:flex-row lg:gap-8 items-center">
+            {/* Branding - hidden on small landscape */}
+            <div className="text-center lg:flex-1 mb-4 lg:mb-0">
+              <Target className="w-12 h-12 lg:w-16 lg:h-16 mx-auto text-emerald-500 mb-2" />
+              <h1 className="text-2xl lg:text-3xl font-bold">Dart Game</h1>
+              <p className="text-sm text-gray-400 hidden sm:block">
+                Multiplayer darts with GranBoard
+              </p>
             </div>
 
-            <form className="space-y-3" onSubmit={handleAuthSubmit}>
-              {formMode === 'register' && (
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1" htmlFor="displayName">
-                    Display Name
-                  </label>
-                  <input
-                    id="displayName"
-                    type="text"
-                    value={displayName}
-                    onChange={(event) => setDisplayName(event.target.value)}
-                    className="input"
-                    placeholder="Nickname"
-                    required
-                  />
+            {/* Auth Form */}
+            <div className="card w-full lg:flex-1 p-4">
+              {error && (
+                <div className="bg-red-900/50 text-red-300 px-3 py-2 rounded mb-3 text-sm">
+                  {error}
+                  <button onClick={clearError} className="ml-2 underline">×</button>
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm text-gray-400 mb-1" htmlFor="email">
-                  Email
-                </label>
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="input"
-                  placeholder="you@example.com"
-                  required
-                />
+              <div className="flex justify-center gap-3 text-xs text-gray-400 mb-3">
+                <button
+                  className={`uppercase tracking-wide font-semibold ${formMode === 'signin' ? 'text-emerald-400' : 'hover:text-gray-200'}`}
+                  onClick={() => setFormMode('signin')}
+                  type="button"
+                >
+                  Sign In
+                </button>
+                <span>|</span>
+                <button
+                  className={`uppercase tracking-wide font-semibold ${formMode === 'register' ? 'text-emerald-400' : 'hover:text-gray-200'}`}
+                  onClick={() => setFormMode('register')}
+                  type="button"
+                >
+                  Register
+                </button>
               </div>
 
-              <div>
-                <label className="block text-sm text-gray-400 mb-1" htmlFor="password">
-                  Password
-                </label>
+              <form className="space-y-2" onSubmit={handleAuthSubmit}>
+                {formMode === 'register' && (
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="input text-sm py-2"
+                    placeholder="Display Name"
+                    required
+                  />
+                )}
                 <input
-                  id="password"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="input text-sm py-2"
+                  placeholder="Email"
+                  required
+                />
+                <input
                   type="password"
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="input"
-                  placeholder="••••••••"
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="input text-sm py-2"
+                  placeholder="Password"
                   required
                   minLength={6}
                 />
-              </div>
+                <button
+                  type="submit"
+                  className="btn btn-primary w-full py-2 text-sm flex items-center justify-center gap-2"
+                  disabled={isSubmitting || isAuthLoading}
+                >
+                  {formMode === 'register' ? (
+                    <><UserPlus className="w-4 h-4" /> Register</>
+                  ) : (
+                    <><LogIn className="w-4 h-4" /> Sign In</>
+                  )}
+                </button>
+              </form>
 
               <button
-                type="submit"
-                className="btn btn-primary w-full flex items-center justify-center gap-2"
-                disabled={isSubmitting || isAuthLoading}
+                onClick={signInAnonymously}
+                className="btn btn-secondary w-full py-2 text-sm mt-2"
               >
-                {formMode === 'register' ? (
-                  <>
-                    <UserPlus className="w-5 h-5" />
-                    Create Account
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="w-5 h-5" />
-                    Sign In
-                  </>
-                )}
+                Play as Guest
               </button>
-            </form>
-
-            <button
-              onClick={signInAnonymously}
-              className="btn btn-secondary w-full"
-            >
-              Play as Guest
-            </button>
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
+  // Logged in - optimized for viewport fit
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold mb-2">Welcome!</h1>
-        <p className="text-gray-400">
-          {isConnected
-            ? 'Connected to server. Choose a game mode to start.'
-            : 'Connecting to server...'}
-        </p>
-      </div>
-
-      {error && (
-        <div className="bg-red-900/50 text-red-300 px-4 py-3 rounded mb-6 text-center">
-          {error}
-          <button onClick={clearError} className="ml-2 underline">
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Game Modes */}
-      <div className="grid md:grid-cols-2 gap-6 mb-8">
-        <div className="card hover:border-emerald-500 border border-transparent transition-colors cursor-pointer"
-             onClick={() => handleCreateGame('501')}>
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-emerald-600 flex items-center justify-center text-2xl font-bold">
-              501
+    <div className="h-full flex items-center justify-center p-4">
+      <div className="w-full max-w-lg lg:max-w-3xl">
+        <div className="flex flex-col lg:flex-row lg:gap-6">
+          {/* Left: Profile & Settings */}
+          <div className="lg:flex-1 space-y-3 mb-4 lg:mb-0">
+            {/* Compact Header */}
+            <div className="flex items-center gap-3">
+              <Target className="w-8 h-8 text-emerald-500 flex-shrink-0" />
+              <div>
+                <h1 className="text-xl font-bold">Dart Game</h1>
+                <p className="text-xs text-gray-400">
+                  {isConnected ? 'Ready to play' : 'Connecting...'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-xl font-bold">501</h2>
-              <p className="text-gray-400">Classic countdown game</p>
+
+            {error && (
+              <div className="bg-red-900/50 text-red-300 px-3 py-2 rounded text-sm">
+                {error}
+                <button onClick={clearError} className="ml-2 underline">×</button>
+              </div>
+            )}
+
+            {/* Profile Card */}
+            <div className="card p-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0">
+                  <User className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">
+                    {user?.displayName || user?.email || 'Guest'}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">
+                    {user?.isAnonymous ? 'Guest' : user?.email}
+                  </p>
+                </div>
+                <button
+                  onClick={signOut}
+                  className="btn btn-secondary p-2 flex-shrink-0"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* GranBoard */}
+            <div className="card p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {isBleConnected ? (
+                    <Bluetooth className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <BluetoothOff className="w-4 h-4 text-gray-400" />
+                  )}
+                  <div>
+                    <p className="text-sm font-medium">GranBoard</p>
+                    <p className="text-xs text-gray-400">
+                      {isBleConnected ? bleDeviceName : 'Not connected'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={isBleConnected ? disconnectBle : connectBle}
+                  disabled={isBleConnecting}
+                  className={`btn text-xs px-3 py-1.5 ${isBleConnected ? 'btn-secondary' : 'btn-primary'}`}
+                >
+                  {isBleConnecting ? '...' : isBleConnected ? 'Disconnect' : 'Connect'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="card hover:border-emerald-500 border border-transparent transition-colors cursor-pointer"
-             onClick={() => handleCreateGame('301')}>
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-2xl font-bold">
-              301
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">301</h2>
-              <p className="text-gray-400">Quick countdown game</p>
-            </div>
+          {/* Right: Actions */}
+          <div className="lg:flex-1 flex flex-col gap-3">
+            <button
+              onClick={handleCreateLobby}
+              disabled={!isConnected}
+              className="btn btn-primary flex-1 min-h-[60px] text-lg flex items-center justify-center gap-3"
+            >
+              <Plus className="w-6 h-6" />
+              Create Lobby
+            </button>
+
+            <button
+              onClick={handleBrowseLobbies}
+              disabled={!isConnected}
+              className="btn btn-secondary flex-1 min-h-[50px] flex items-center justify-center gap-2"
+            >
+              <Users className="w-5 h-5" />
+              Browse Lobbies
+            </button>
           </div>
         </div>
-
-        <div className="card hover:border-emerald-500 border border-transparent transition-colors cursor-pointer"
-             onClick={() => handleCreateGame('cricket')}>
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-red-600 flex items-center justify-center">
-              <Target className="w-8 h-8" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">Cricket</h2>
-              <p className="text-gray-400">Close out segments to win</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="card hover:border-emerald-500 border border-transparent transition-colors cursor-pointer"
-             onClick={() => handleCreateGame('tictactoe')}>
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-purple-600 flex items-center justify-center text-2xl font-bold">
-              #
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">Tic-Tac-Toe</h2>
-              <p className="text-gray-400">Claim squares on the board</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-center">
-        <button
-          onClick={handleJoinGame}
-          className="btn btn-secondary flex items-center justify-center gap-2"
-          disabled={!isConnected}
-        >
-          <Users className="w-5 h-5" />
-          Browse Lobbies
-        </button>
       </div>
     </div>
   );

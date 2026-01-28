@@ -164,6 +164,10 @@ class SocketService {
     this.socket?.emit('UNDO_ROUND');
   }
 
+  requestRematch(): void {
+    this.socket?.emit('REQUEST_REMATCH');
+  }
+
   // Agora
   requestAgoraToken(channelName: string, uid?: number): void {
     this.socket?.emit('REQUEST_AGORA_TOKEN', { channelName, uid });

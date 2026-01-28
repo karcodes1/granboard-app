@@ -3,6 +3,7 @@ import { User } from 'firebase/auth';
 import { firebaseService } from '../services/firebase';
 import { socketService, onLobbyState, onLobbyList, onGameState, onAuthSuccess, onError } from '../services/socket';
 import { bleService, DartHit } from '../services/ble';
+import { getAuthErrorMessage } from '../utils/authErrors';
 import type { Lobby, GameState, GameType, GameOptions } from '../types';
 
 interface GameStore {
@@ -61,6 +62,7 @@ interface GameStore {
   endTurn: () => void;
   undoThrow: () => void;
   undoRound: () => void;
+  requestRematch: () => void;
 
   clearError: () => void;
 }
@@ -156,7 +158,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       try {
         await firebaseService.registerWithEmail(email, password, displayName);
       } catch (error) {
-        set({ error: (error as Error).message });
+        set({ error: getAuthErrorMessage(error) });
       }
     },
 
@@ -164,7 +166,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       try {
         await firebaseService.signInWithEmail(email, password);
       } catch (error) {
-        set({ error: (error as Error).message });
+        set({ error: getAuthErrorMessage(error) });
       }
     },
 
@@ -172,7 +174,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       try {
         await firebaseService.signInAnonymously();
       } catch (error) {
-        set({ error: (error as Error).message });
+        set({ error: getAuthErrorMessage(error) });
       }
     },
 
@@ -288,6 +290,10 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     undoRound: () => {
       socketService.undoRound();
+    },
+
+    requestRematch: () => {
+      socketService.requestRematch();
     },
 
     clearError: () => {
