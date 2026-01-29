@@ -4,6 +4,7 @@ import { useGameStore } from './store/gameStore';
 import { HomePage } from './pages/HomePage';
 import { LobbyPage } from './pages/LobbyPage';
 import { GamePage } from './pages/GamePage';
+import { ProfilePage } from './pages/ProfilePage';
 import { Layout } from './components/Layout';
 
 function App() {
@@ -32,6 +33,10 @@ function App() {
         <Route
           path="/game"
           element={user ? <GamePage /> : <Navigate to="/" replace />}
+        />
+        <Route
+          path="/profile"
+          element={user ? <ProfilePage /> : <Navigate to="/" replace />}
         />
       </Routes>
     </Layout>

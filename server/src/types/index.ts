@@ -5,6 +5,32 @@ export type LobbyId = string;
 export type GameId = string;
 export type TeamId = string;
 
+// Team mode types
+export type TeamMode = 'ffa' | 'teams';
+export type TeamConfig = '2v2' | '2v2v2' | '2v2v2v2' | '3v3' | '4v4';
+
+// Player colors for visual identification
+export const PLAYER_COLORS = [
+  { id: 'red', name: 'Red', bg: 'bg-red-600', text: 'text-red-400', border: 'border-red-500' },
+  { id: 'blue', name: 'Blue', bg: 'bg-blue-600', text: 'text-blue-400', border: 'border-blue-500' },
+  { id: 'green', name: 'Green', bg: 'bg-green-600', text: 'text-green-400', border: 'border-green-500' },
+  { id: 'yellow', name: 'Yellow', bg: 'bg-yellow-500', text: 'text-yellow-400', border: 'border-yellow-500' },
+  { id: 'purple', name: 'Purple', bg: 'bg-purple-600', text: 'text-purple-400', border: 'border-purple-500' },
+  { id: 'orange', name: 'Orange', bg: 'bg-orange-500', text: 'text-orange-400', border: 'border-orange-500' },
+  { id: 'pink', name: 'Pink', bg: 'bg-pink-500', text: 'text-pink-400', border: 'border-pink-500' },
+  { id: 'cyan', name: 'Cyan', bg: 'bg-cyan-500', text: 'text-cyan-400', border: 'border-cyan-500' },
+] as const;
+
+export type PlayerColorId = typeof PLAYER_COLORS[number]['id'];
+
+// Team definitions with colors
+export interface Team {
+  id: TeamId;
+  name: string;
+  colorId: PlayerColorId;
+  playerIds: PlayerId[];
+}
+
 // Player types
 export type PlayerType = 'authenticated' | 'guest';
 
@@ -14,6 +40,7 @@ export interface Player {
   ownerUserId: string; // Firebase UID of client owner
   displayName: string;
   teamId?: TeamId;
+  colorIndex?: number; // Index into PLAYER_COLORS for FFA mode
 }
 
 // Dart throw types
@@ -53,6 +80,8 @@ export interface PlayerGameState {
   roundThrows: DartThrow[];
   allThrows: DartThrow[];
   stats: PlayerStats;
+  teamId?: TeamId;
+  colorIndex?: number;
 }
 
 export interface PlayerStats {
@@ -89,6 +118,19 @@ export interface TicTacToeState {
 
 export type GameSpecificState = CricketState | TicTacToeState | Record<string, unknown>;
 
+// Team game state (for team mode)
+export interface TeamGameState {
+  teamId: TeamId;
+  name: string;
+  colorId: string;
+  playerIds: PlayerId[];
+  score: number;
+  legsWon: number;
+  setsWon: number;
+  hasDoubledIn: boolean;
+  currentPlayerIndex: number; // Which player in the team is currently throwing
+}
+
 // Main game state
 export interface GameState {
   version: number;
@@ -104,12 +146,19 @@ export interface GameState {
   players: Record<PlayerId, PlayerGameState>;
   playerOrder: PlayerId[];
   
+  // Team mode fields
+  teamMode: TeamMode;
+  teams?: TeamGameState[];
+  teamOrder?: TeamId[];
+  currentTeamIndex?: number;
+  
   currentRound: number;
   currentLeg: number;
   currentSet: number;
   
   state: 'waiting' | 'playing' | 'paused' | 'finished';
   winnerId?: PlayerId;
+  winnerTeamId?: TeamId;
   
   gameSpecific: GameSpecificState;
   
@@ -130,7 +179,9 @@ export interface Lobby {
   ownerUserId: string;
   ownerDisplayName: string;
   players: LobbyPlayer[];
-  teams: Record<TeamId, PlayerId[]>;
+  teamMode: TeamMode;
+  teamConfig?: TeamConfig;
+  teams: Team[];
   gameType: GameType;
   gameOptions: GameOptions;
   status: LobbyStatus;

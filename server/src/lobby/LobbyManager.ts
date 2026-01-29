@@ -8,6 +8,10 @@ import {
   GameType,
   GameOptions,
   TeamId,
+  TeamMode,
+  TeamConfig,
+  Team,
+  PLAYER_COLORS,
 } from '../types/index.js';
 import { GameEngine } from '../game/GameEngine.js';
 
@@ -42,7 +46,8 @@ export class LobbyManager {
       ownerUserId,
       ownerDisplayName,
       players: [ownerPlayer],
-      teams: {},
+      teamMode: 'ffa',
+      teams: [],
       gameType,
       gameOptions: options,
       status: 'waiting',
@@ -243,25 +248,127 @@ export class LobbyManager {
     return lobby;
   }
 
+  // Set team mode (FFA or teams)
+  setTeamMode(lobbyId: LobbyId, userId: string, teamMode: TeamMode, teamConfig?: TeamConfig): Lobby | null {
+    const lobby = this.lobbies.get(lobbyId);
+    if (!lobby) return null;
+
+    if (lobby.ownerUserId !== userId) {
+      throw new Error('Only the lobby owner can change team mode');
+    }
+
+    lobby.teamMode = teamMode;
+    lobby.teamConfig = teamConfig;
+
+    // Set up teams based on configuration
+    if (teamMode === 'teams' && teamConfig) {
+      lobby.teams = this.createTeamsForConfig(teamConfig);
+    } else {
+      lobby.teams = [];
+    }
+
+    // Clear player team assignments
+    for (const player of lobby.players) {
+      player.teamId = undefined;
+    }
+
+    // In FFA mode, assign colors to players
+    if (teamMode === 'ffa') {
+      lobby.players.forEach((player, index) => {
+        player.colorIndex = index % PLAYER_COLORS.length;
+      });
+    }
+
+    lobby.updatedAt = Date.now();
+    return lobby;
+  }
+
+  // Create teams based on configuration
+  private createTeamsForConfig(config: TeamConfig): Team[] {
+    const teamColors: Array<{ name: string; colorId: typeof PLAYER_COLORS[number]['id'] }> = [
+      { name: 'Team Red', colorId: 'red' },
+      { name: 'Team Blue', colorId: 'blue' },
+      { name: 'Team Green', colorId: 'green' },
+      { name: 'Team Yellow', colorId: 'yellow' },
+    ];
+
+    let numTeams = 2;
+    if (config === '2v2v2') numTeams = 3;
+    if (config === '2v2v2v2') numTeams = 4;
+
+    return teamColors.slice(0, numTeams).map((tc, index) => ({
+      id: `team-${index + 1}`,
+      name: tc.name,
+      colorId: tc.colorId,
+      playerIds: [],
+    }));
+  }
+
+  // Validate team mode configuration before starting game
+  private validateTeamMode(lobby: Lobby): void {
+    const { gameType, teamMode, teamConfig, teams, players } = lobby;
+
+    // FFA mode - no restrictions
+    if (teamMode === 'ffa') {
+      return;
+    }
+
+    // Team mode validations
+    if (teamMode === 'teams') {
+      if (!teamConfig) {
+        throw new Error('Team configuration required for team mode');
+      }
+
+      // Check all players are assigned to teams
+      const unassigned = players.filter(p => !p.teamId);
+      if (unassigned.length > 0) {
+        throw new Error(`All players must be assigned to teams: ${unassigned.map(p => p.displayName).join(', ')}`);
+      }
+
+      // Validate game type supports the team config
+      const isTwoTeamOnly = gameType === 'cricket' || gameType === 'tictactoe';
+      const numTeams = teams.length;
+
+      if (isTwoTeamOnly && numTeams !== 2) {
+        throw new Error(`${gameType} only supports 2 teams`);
+      }
+      // 01 games support all team configurations
+
+      // Validate team sizes are balanced
+      const teamSizes = teams.map(t => t.playerIds.length);
+      const allSameSize = teamSizes.every(size => size === teamSizes[0]);
+      if (!allSameSize) {
+        throw new Error('Teams must have equal numbers of players');
+      }
+
+      if (teamSizes[0] === 0) {
+        throw new Error('Each team must have at least one player');
+      }
+    }
+  }
+
   // Assign player to team
   assignToTeam(lobbyId: LobbyId, playerId: PlayerId, teamId: TeamId): Lobby | null {
     const lobby = this.lobbies.get(lobbyId);
     if (!lobby) return null;
 
     // Remove from current team
-    for (const tid of Object.keys(lobby.teams)) {
-      lobby.teams[tid] = lobby.teams[tid].filter(pid => pid !== playerId);
+    for (const team of lobby.teams) {
+      team.playerIds = team.playerIds.filter(pid => pid !== playerId);
     }
 
     // Add to new team
-    if (!lobby.teams[teamId]) {
-      lobby.teams[teamId] = [];
+    const targetTeam = lobby.teams.find(t => t.id === teamId);
+    if (targetTeam) {
+      targetTeam.playerIds.push(playerId);
     }
-    lobby.teams[teamId].push(playerId);
 
+    // Update player's teamId
     const player = lobby.players.find(p => p.id === playerId);
     if (player) {
       player.teamId = teamId;
+      // Clear FFA color index when in team mode
+      player.colorIndex = undefined;
     }
 
     lobby.updatedAt = Date.now();
@@ -292,17 +399,31 @@ export class LobbyManager {
       throw new Error(`Players not ready: ${notReady.map(p => p.displayName).join(', ')}`);
     }
 
+    // Validate team mode restrictions
+    this.validateTeamMode(lobby);
+
     // Convert lobby players to game players
-    const players: Player[] = lobby.players.map(lp => ({
+    const players: Player[] = lobby.players.map((lp, index) => ({
       id: lp.id,
       type: lp.type,
       ownerUserId: lp.ownerUserId,
       displayName: lp.displayName,
       teamId: lp.teamId,
+      colorIndex: lp.colorIndex ?? index % PLAYER_COLORS.length,
     }));
 
-    // Create game engine
-    const game = new GameEngine(lobby.gameType, players, lobby.gameOptions);
+    // Create game engine with team info
+    const teamInfo = lobby.teamMode === 'teams' ? {
+      teamMode: lobby.teamMode,
+      teams: lobby.teams.map(t => ({
+        teamId: t.id,
+        name: t.name,
+        colorId: t.colorId,
+        playerIds: t.playerIds,
+      })),
+    } : { teamMode: 'ffa' as const };
+    
+    const game = new GameEngine(lobby.gameType, players, lobby.gameOptions, teamInfo);
     game.startGame();
 
     // Update lobby status

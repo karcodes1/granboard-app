@@ -11,7 +11,21 @@ import {
   GameEvent,
   CricketState,
   TicTacToeState,
+  TeamMode,
+  TeamId,
+  TeamGameState,
 } from '../types/index.js';
+
+// Team info passed from lobby
+export interface GameTeamInfo {
+  teamMode: TeamMode;
+  teams?: {
+    teamId: string;
+    name: string;
+    colorId: string;
+    playerIds: PlayerId[];
+  }[];
+}
 
 // Default game options
 const DEFAULT_OPTIONS: Record<GameType, GameOptions> = {
@@ -28,7 +42,12 @@ export class GameEngine {
   private state: GameState;
   private events: GameEvent[] = [];
 
-  constructor(gameType: GameType, players: Player[], options: Partial<GameOptions> = {}) {
+  constructor(
+    gameType: GameType,
+    players: Player[],
+    options: Partial<GameOptions> = {},
+    teamInfo: GameTeamInfo = { teamMode: 'ffa' }
+  ) {
     const mergedOptions = { ...DEFAULT_OPTIONS[gameType], ...options };
     const gameId = uuidv4();
     const now = Date.now();
@@ -42,8 +61,33 @@ export class GameEngine {
       playerStates[player.id] = this.createPlayerState(player, gameType, mergedOptions);
     }
 
+    // Initialize team states if in team mode
+    let teams: TeamGameState[] | undefined;
+    let teamOrder: TeamId[] | undefined;
+    let currentTeamIndex: number | undefined;
+    let firstPlayerId: PlayerId;
+
+    if (teamInfo.teamMode === 'teams' && teamInfo.teams) {
+      teams = teamInfo.teams.map(t => ({
+        teamId: t.teamId,
+        name: t.name,
+        colorId: t.colorId,
+        playerIds: t.playerIds,
+        score: gameType === '501' || gameType === '301' ? (mergedOptions.startingScore || 501) : 0,
+        legsWon: 0,
+        setsWon: 0,
+        hasDoubledIn: !mergedOptions.doubleIn,
+        currentPlayerIndex: 0,
+      }));
+      teamOrder = teams.map(t => t.teamId);
+      currentTeamIndex = 0;
+      // First player is the first player of the first team
+      firstPlayerId = teams[0].playerIds[0];
+    } else {
+      firstPlayerId = playerOrder[0];
+    }
+
     // Initialize turn state
-    const firstPlayerId = playerOrder[0];
     const turn: TurnState = {
       playerId: firstPlayerId,
       darts: [null, null, null],
@@ -60,10 +104,14 @@ export class GameEngine {
       gameType,
       options: mergedOptions,
       currentPlayerId: firstPlayerId,
-      currentPlayerIndex: 0,
+      currentPlayerIndex: teamInfo.teamMode === 'ffa' ? 0 : playerOrder.indexOf(firstPlayerId),
       turn,
       players: playerStates,
       playerOrder,
+      teamMode: teamInfo.teamMode,
+      teams,
+      teamOrder,
+      currentTeamIndex,
       currentRound: 1,
       currentLeg: 1,
       currentSet: 1,
@@ -99,6 +147,8 @@ export class GameEngine {
         checkouts: 0,
         busts: 0,
       },
+      teamId: player.teamId,
+      colorIndex: player.colorIndex,
     };
   }
 
@@ -211,11 +261,21 @@ export class GameEngine {
   } {
     const playerState = this.state.players[playerId];
     const options = this.state.options;
+    const isTeamMode = this.state.teamMode === 'teams' && this.state.teams;
+    const team = isTeamMode ? this.getPlayerTeam(playerId) : null;
+
+    // Get current score (team score in team mode, player score in FFA)
+    const currentScore = team ? team.score : playerState.score;
+    const hasDoubledIn = team ? team.hasDoubledIn : playerState.hasDoubledIn;
 
     // Check double-in requirement
-    if (options.doubleIn && !playerState.hasDoubledIn) {
+    if (options.doubleIn && !hasDoubledIn) {
       if (dart.multiplier === 'D' || dart.multiplier === 'DB') {
-        playerState.hasDoubledIn = true;
+        if (team) {
+          team.hasDoubledIn = true;
+        } else {
+          playerState.hasDoubledIn = true;
+        }
       } else {
         // Non-scoring throw until doubled in
         this.addThrowToState(playerId, { ...dart, points: 0 });
@@ -223,7 +283,7 @@ export class GameEngine {
       }
     }
 
-    const newScore = playerState.score - dart.points;
+    const newScore = currentScore - dart.points;
 
     // Check for bust
     if (newScore < 0 || (newScore === 1 && options.doubleOut) || 
@@ -233,8 +293,12 @@ export class GameEngine {
       return { success: true, bust: true, checkout: false };
     }
 
-    // Update score
-    playerState.score = newScore;
+    // Update score (team or player)
+    if (team) {
+      team.score = newScore;
+    } else {
+      playerState.score = newScore;
+    }
     this.addThrowToState(playerId, dart);
 
     // Check for checkout
@@ -248,6 +312,12 @@ export class GameEngine {
     }
 
     return { success: true, bust: false, checkout: false };
+  }
+
+  // Helper to get the team for a player
+  private getPlayerTeam(playerId: PlayerId): TeamGameState | null {
+    if (!this.state.teams) return null;
+    return this.state.teams.find(t => t.playerIds.includes(playerId)) || null;
   }
 
   private processCricketThrow(playerId: PlayerId, dart: DartThrow): {
@@ -438,10 +508,14 @@ export class GameEngine {
 
   private handleBust(playerId: PlayerId): void {
     const playerState = this.state.players[playerId];
+    const team = this.getPlayerTeam(playerId);
     
-    // Restore score (undo round throws)
-    for (const dart of playerState.roundThrows) {
-      playerState.score += dart.points;
+    // Restore score (undo round throws) - to team or player
+    const roundPoints = playerState.roundThrows.reduce((sum, d) => sum + d.points, 0);
+    if (team) {
+      team.score += roundPoints;
+    } else {
+      playerState.score += roundPoints;
     }
     
     playerState.stats.busts++;
@@ -463,8 +537,15 @@ export class GameEngine {
     message?: string;
   } {
     const playerState = this.state.players[playerId];
+    const team = this.getPlayerTeam(playerId);
     playerState.stats.checkouts++;
-    playerState.legsWon++;
+
+    // Track legs/sets on team or player
+    if (team) {
+      team.legsWon++;
+    } else {
+      playerState.legsWon++;
+    }
 
     this.addEvent({
       type: 'CHECKOUT',
@@ -480,33 +561,49 @@ export class GameEngine {
     const options = this.state.options;
     const legsToWin = options.legs || 1;
     const setsToWin = options.sets || 1;
+    const legsWon = team ? team.legsWon : playerState.legsWon;
 
     // Check if set is won
-    if (playerState.legsWon >= legsToWin) {
-      playerState.setsWon++;
+    if (legsWon >= legsToWin) {
+      if (team) {
+        team.setsWon++;
+      } else {
+        playerState.setsWon++;
+      }
       
       this.addEvent({
         type: 'SET_WON',
         playerId,
       });
 
+      const setsWon = team ? team.setsWon : playerState.setsWon;
+
       // Check if match is won
-      if (playerState.setsWon >= setsToWin) {
+      if (setsWon >= setsToWin) {
         this.state.winnerId = playerId;
+        if (team) {
+          this.state.winnerTeamId = team.teamId;
+        }
         this.state.state = 'finished';
 
         this.addEvent({
           type: 'GAME_OVER',
           playerId,
-          data: { winnerId: playerId },
+          data: { winnerId: playerId, winnerTeamId: team?.teamId },
         });
 
         return { success: true, bust: false, checkout: true, message: 'Game over!' };
       }
 
       // Reset legs for new set
-      for (const pid of this.state.playerOrder) {
-        this.state.players[pid].legsWon = 0;
+      if (this.state.teams) {
+        for (const t of this.state.teams) {
+          t.legsWon = 0;
+        }
+      } else {
+        for (const pid of this.state.playerOrder) {
+          this.state.players[pid].legsWon = 0;
+        }
       }
       this.state.currentSet++;
     }
@@ -522,16 +619,35 @@ export class GameEngine {
     
     // Reset scores
     const startingScore = this.state.options.startingScore || 501;
+    
+    if (this.state.teams) {
+      // Reset team scores and state
+      for (const team of this.state.teams) {
+        team.score = startingScore;
+        team.hasDoubledIn = !this.state.options.doubleIn;
+        team.currentPlayerIndex = 0;
+      }
+    }
+    
+    // Reset player state
     for (const playerId of this.state.playerOrder) {
       const playerState = this.state.players[playerId];
-      playerState.score = startingScore;
+      playerState.score = startingScore; // Keep for FFA mode
       playerState.hasDoubledIn = !this.state.options.doubleIn;
       playerState.roundThrows = [];
     }
 
-    // Reset turn
-    this.state.currentPlayerIndex = 0;
-    this.state.currentPlayerId = this.state.playerOrder[0];
+    // Reset turn - in team mode, start with first player of first team
+    if (this.state.teams && this.state.teamOrder) {
+      this.state.currentTeamIndex = 0;
+      const firstTeam = this.state.teams[0];
+      this.state.currentPlayerId = firstTeam.playerIds[0];
+      this.state.currentPlayerIndex = this.state.playerOrder.indexOf(this.state.currentPlayerId);
+    } else {
+      this.state.currentPlayerIndex = 0;
+      this.state.currentPlayerId = this.state.playerOrder[0];
+    }
+    
     this.state.turn = {
       playerId: this.state.currentPlayerId,
       darts: [null, null, null],
@@ -567,13 +683,39 @@ export class GameEngine {
     // Clear round throws
     playerState.roundThrows = [];
 
-    // Move to next player
-    this.state.currentPlayerIndex = (this.state.currentPlayerIndex + 1) % this.state.playerOrder.length;
-    this.state.currentPlayerId = this.state.playerOrder[this.state.currentPlayerIndex];
+    // Move to next player/team
+    if (this.state.teams && this.state.teamOrder && this.state.currentTeamIndex !== undefined) {
+      // Team mode: move to next team, rotate players within teams
+      const currentTeam = this.state.teams[this.state.currentTeamIndex];
+      
+      // Move to next team
+      this.state.currentTeamIndex = (this.state.currentTeamIndex + 1) % this.state.teams.length;
+      const nextTeam = this.state.teams[this.state.currentTeamIndex];
+      
+      // Get next player from next team (rotate through team members)
+      this.state.currentPlayerId = nextTeam.playerIds[nextTeam.currentPlayerIndex];
+      this.state.currentPlayerIndex = this.state.playerOrder.indexOf(this.state.currentPlayerId);
+      
+      // If we've gone through all teams, increment round and rotate players within teams
+      if (this.state.currentTeamIndex === 0) {
+        this.state.currentRound++;
+        // Rotate to next player in each team
+        for (const team of this.state.teams) {
+          team.currentPlayerIndex = (team.currentPlayerIndex + 1) % team.playerIds.length;
+        }
+        // Update current player to the rotated player
+        this.state.currentPlayerId = nextTeam.playerIds[nextTeam.currentPlayerIndex];
+        this.state.currentPlayerIndex = this.state.playerOrder.indexOf(this.state.currentPlayerId);
+      }
+    } else {
+      // FFA mode: simple rotation through all players
+      this.state.currentPlayerIndex = (this.state.currentPlayerIndex + 1) % this.state.playerOrder.length;
+      this.state.currentPlayerId = this.state.playerOrder[this.state.currentPlayerIndex];
 
-    // If we've gone through all players, increment round
-    if (this.state.currentPlayerIndex === 0) {
-      this.state.currentRound++;
+      // If we've gone through all players, increment round
+      if (this.state.currentPlayerIndex === 0) {
+        this.state.currentRound++;
+      }
     }
 
     // Reset turn state
@@ -606,9 +748,14 @@ export class GameEngine {
     playerState.stats.dartsThrown--;
     playerState.stats.totalPoints -= dart.points;
 
-    // Restore score for 501/301
+    // Restore score for 501/301 (team or player)
     if (this.state.gameType === '501' || this.state.gameType === '301') {
-      playerState.score += dart.points;
+      const team = this.getPlayerTeam(playerId);
+      if (team) {
+        team.score += dart.points;
+      } else {
+        playerState.score += dart.points;
+      }
     }
 
     // Update turn state

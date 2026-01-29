@@ -72,6 +72,7 @@ const createGameState = (): GameState => ({
     },
   },
   playerOrder: ['p1', 'p2'],
+  teamMode: 'ffa',
   currentRound: 1,
   currentLeg: 1,
   currentSet: 1,

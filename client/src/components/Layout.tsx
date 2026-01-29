@@ -1,7 +1,7 @@
 import { ReactNode, useRef, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
-import { Target, Bluetooth, Wifi, WifiOff, LogOut, User, Maximize, Minimize } from 'lucide-react';
+import { Target, Bluetooth, Wifi, WifiOff, LogOut, User } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
@@ -11,8 +11,6 @@ export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const isGamePage = location.pathname === '/game';
   const headerRef = useRef<HTMLElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
 
   const {
@@ -25,39 +23,6 @@ export function Layout({ children }: LayoutProps) {
     connectBle,
     disconnectBle,
   } = useGameStore();
-
-  // Track header height for game page layout
-  useEffect(() => {
-    const updateHeaderHeight = () => {
-      if (headerRef.current) {
-        setHeaderHeight(headerRef.current.offsetHeight);
-      }
-    };
-    updateHeaderHeight();
-    window.addEventListener('resize', updateHeaderHeight);
-    return () => window.removeEventListener('resize', updateHeaderHeight);
-  }, []);
-
-  // Fullscreen API
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
-
-  const toggleFullscreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch (err) {
-      console.warn('Fullscreen not supported:', err);
-    }
-  };
 
   // Wake Lock API - prevent device from sleeping during game
   useEffect(() => {
@@ -98,7 +63,8 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-gray-900 text-white flex flex-col">
-      {/* Header - compact on mobile */}
+      {/* Header - hidden on game page */}
+      {!isGamePage && (
       <header ref={headerRef} className="bg-gray-800 border-b border-gray-700 safe-top flex-shrink-0">
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-1.5 sm:gap-2 text-lg sm:text-xl font-bold text-emerald-500">
@@ -129,16 +95,6 @@ export function Layout({ children }: LayoutProps) {
                 </span>
               </button>
 
-              {/* Fullscreen button - show on game page */}
-              {isGamePage && (
-                <button
-                  onClick={toggleFullscreen}
-                  className="p-1.5 rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
-                  title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                >
-                  {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                </button>
-              )}
             </div>
 
             {/* User Menu */}
@@ -160,13 +116,13 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </div>
       </header>
+      )}
 
       {/* Main Content - fills remaining space */}
       <main
-        className={`flex-1 max-w-7xl w-full mx-auto safe-bottom ${
-          isGamePage ? 'overflow-hidden' : 'px-2 sm:px-4 py-4 sm:py-6 overflow-y-auto'
+        className={`flex-1 w-full mx-auto safe-bottom ${
+          isGamePage ? 'overflow-hidden h-[100dvh]' : 'max-w-7xl px-2 sm:px-4 py-4 sm:py-6 overflow-y-auto'
         }`}
-        style={isGamePage ? { height: `calc(100dvh - ${headerHeight}px)` } : undefined}
       >
         {children}
       </main>

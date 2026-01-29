@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { firebaseService } from './firebase';
-import type { Lobby, GameState, GameType, GameOptions, AgoraTokenResponse } from '../types';
+import type { Lobby, GameState, GameType, GameOptions, AgoraTokenResponse, TeamMode, TeamConfig } from '../types';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
@@ -141,6 +141,18 @@ class SocketService {
 
   updateLobbyOptions(options: Partial<GameOptions>, gameType?: GameType): void {
     this.socket?.emit('UPDATE_LOBBY_OPTIONS', { options, gameType });
+  }
+
+  setTeamMode(teamMode: TeamMode, teamConfig?: TeamConfig): void {
+    this.socket?.emit('SET_TEAM_MODE', { teamMode, teamConfig });
+  }
+
+  assignTeam(playerId: string, teamId: string): void {
+    this.socket?.emit('ASSIGN_TEAM', { playerId, teamId });
+  }
+
+  setDisplayName(displayName: string): void {
+    this.socket?.emit('SET_DISPLAY_NAME', { displayName });
   }
 
   startGame(): void {

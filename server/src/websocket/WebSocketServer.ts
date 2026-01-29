@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
-import { verifyIdToken } from '../auth/FirebaseAuth.js';
+import { verifyIdToken, getUserProfile, saveUserProfile } from '../auth/FirebaseAuth.js';
 import { lobbyManager } from '../lobby/LobbyManager.js';
 import { agoraTokenService } from '../services/AgoraTokenService.js';
 import {
@@ -9,6 +9,8 @@ import {
   GameType,
   GameOptions,
   DartThrow,
+  TeamMode,
+  TeamConfig,
 } from '../types/index.js';
 
 export class WebSocketServer {
@@ -36,6 +38,11 @@ export class WebSocketServer {
       // Authentication
       socket.on('AUTH', async (data: { idToken: string }) => {
         await this.handleAuth(socket, data.idToken);
+      });
+
+      // Set display name
+      socket.on('SET_DISPLAY_NAME', (data: { displayName: string }) => {
+        this.handleSetDisplayName(socket, data.displayName);
       });
 
       // Lobby events
@@ -73,6 +80,14 @@ export class WebSocketServer {
 
       socket.on('UPDATE_LOBBY_OPTIONS', (data: { options: Partial<GameOptions>; gameType?: GameType }) => {
         this.handleUpdateLobbyOptions(socket, data.options, data.gameType);
+      });
+
+      socket.on('SET_TEAM_MODE', (data: { teamMode: string; teamConfig?: string }) => {
+        this.handleSetTeamMode(socket, data.teamMode, data.teamConfig);
+      });
+
+      socket.on('ASSIGN_TEAM', (data: { playerId: string; teamId: string }) => {
+        this.handleAssignTeam(socket, data.playerId, data.teamId);
       });
 
       socket.on('START_GAME', () => {
@@ -116,10 +131,25 @@ export class WebSocketServer {
         return;
       }
 
+      // Try to get displayName from Firestore first, fall back to token name, then email
+      let displayName = user.name;
+      const profile = await getUserProfile(user.uid);
+      if (profile?.displayName) {
+        displayName = profile.displayName;
+      } else if (user.name) {
+        // Save the name from token to Firestore for future use
+        await saveUserProfile(user.uid, user.name, user.email);
+      }
+
+      // Final fallback
+      if (!displayName) {
+        displayName = user.email || `User-${user.uid.substring(0, 6)}`;
+      }
+
       const session: ClientSession = {
         socketId: socket.id,
         userId: user.uid,
-        displayName: user.name || user.email || `User-${user.uid.substring(0, 6)}`,
+        displayName,
         guestPlayers: [],
       };
 
@@ -129,7 +159,7 @@ export class WebSocketServer {
         displayName: session.displayName,
       });
 
-      console.log(`[WebSocket] User authenticated: ${user.uid}`);
+      console.log(`[WebSocket] User authenticated: ${user.uid} as ${displayName}`);
     } catch (error) {
       console.error('[WebSocket] Auth error:', error);
       socket.emit('AUTH_ERROR', { message: 'Authentication failed' });
@@ -304,6 +334,93 @@ export class WebSocketServer {
     const lobby = lobbyManager.setReady(session.currentLobbyId, session.userId, isReady);
     if (lobby) {
       this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby });
+    }
+  }
+
+  private async handleSetDisplayName(socket: Socket, displayName: string): Promise<void> {
+    const session = this.getSession(socket);
+    if (!session) return;
+
+    try {
+      // Save to Firestore
+      await saveUserProfile(session.userId, displayName);
+      
+      // Update session
+      session.displayName = displayName;
+
+      // Update in current lobby if in one
+      if (session.currentLobbyId) {
+        const lobby = lobbyManager.getLobby(session.currentLobbyId);
+        if (lobby) {
+          const player = lobby.players.find(p => p.id === session.userId);
+          if (player) {
+            player.displayName = displayName;
+            lobby.updatedAt = Date.now();
+            // If this is the owner, also update ownerDisplayName
+            if (lobby.ownerUserId === session.userId) {
+              lobby.ownerDisplayName = displayName;
+            }
+            this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby });
+          }
+        }
+      }
+
+      socket.emit('AUTH_SUCCESS', {
+        userId: session.userId,
+        displayName: session.displayName,
+      });
+
+      console.log(`[WebSocket] User ${session.userId} changed display name to ${displayName}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to update display name';
+      socket.emit('ERROR', { message });
+    }
+  }
+
+  private handleAssignTeam(socket: Socket, playerId: string, teamId: string): void {
+    const session = this.getSession(socket);
+    if (!session || !session.currentLobbyId) return;
+
+    try {
+      // Only lobby owner can assign teams
+      const lobby = lobbyManager.getLobby(session.currentLobbyId);
+      if (!lobby) {
+        socket.emit('LOBBY_ERROR', { message: 'Lobby not found' });
+        return;
+      }
+
+      if (lobby.ownerUserId !== session.userId) {
+        socket.emit('LOBBY_ERROR', { message: 'Only the host can assign teams' });
+        return;
+      }
+
+      const updatedLobby = lobbyManager.assignToTeam(session.currentLobbyId, playerId, teamId);
+      if (updatedLobby) {
+        this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby: updatedLobby });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to assign team';
+      socket.emit('LOBBY_ERROR', { message });
+    }
+  }
+
+  private handleSetTeamMode(socket: Socket, teamMode: string, teamConfig?: string): void {
+    const session = this.getSession(socket);
+    if (!session || !session.currentLobbyId) return;
+
+    try {
+      const updatedLobby = lobbyManager.setTeamMode(
+        session.currentLobbyId,
+        session.userId,
+        teamMode as TeamMode,
+        teamConfig as TeamConfig | undefined
+      );
+      if (updatedLobby) {
+        this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby: updatedLobby });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to set team mode';
+      socket.emit('LOBBY_ERROR', { message });
     }
   }
 

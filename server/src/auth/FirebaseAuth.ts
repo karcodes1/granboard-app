@@ -130,3 +130,53 @@ export async function getPlayerStats(userId: string): Promise<PlayerStats | null
     return null;
   }
 }
+
+// User profile interface
+export interface UserProfile {
+  displayName: string;
+  email?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// Save user profile (displayName)
+export async function saveUserProfile(userId: string, displayName: string, email?: string): Promise<void> {
+  const db = getFirestore();
+  const docRef = db.collection('users').doc(userId);
+
+  try {
+    const doc = await docRef.get();
+    const now = Date.now();
+    
+    if (doc.exists) {
+      await docRef.update({
+        displayName,
+        updatedAt: now,
+      });
+    } else {
+      await docRef.set({
+        displayName,
+        email,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    console.log(`[Firebase] Saved profile for user ${userId}`);
+  } catch (error) {
+    console.error('[Firebase] Failed to save profile:', error);
+  }
+}
+
+// Get user profile
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const db = getFirestore();
+  const docRef = db.collection('users').doc(userId);
+
+  try {
+    const doc = await docRef.get();
+    return doc.exists ? doc.data() as UserProfile : null;
+  } catch (error) {
+    console.error('[Firebase] Failed to get profile:', error);
+    return null;
+  }
+}

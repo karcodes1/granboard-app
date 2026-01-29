@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
-import { Target, Users, LogIn, UserPlus, LogOut, Plus, Bluetooth, BluetoothOff, User } from 'lucide-react';
+import { Target, Users, LogIn, UserPlus, LogOut, Plus, Bluetooth, BluetoothOff, User, Settings } from 'lucide-react';
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -20,6 +20,8 @@ export function HomePage() {
     bleDeviceName,
     connectBle,
     disconnectBle,
+    createLobby,
+    serverDisplayName,
   } = useGameStore();
 
   const [formMode, setFormMode] = useState<'signin' | 'register'>('signin');
@@ -29,7 +31,9 @@ export function HomePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleCreateLobby = () => {
-    navigate('/lobby?create=true');
+    // Immediately create lobby with default 501 settings
+    createLobby('501', { startingScore: 501, doubleOut: true, doubleIn: false, legs: 1, sets: 1 });
+    navigate('/lobby');
   };
 
   const handleBrowseLobbies = () => {
@@ -180,17 +184,30 @@ export function HomePage() {
             {/* Profile Card */}
             <div className="card p-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0">
+                <button
+                  onClick={() => navigate('/profile')}
+                  className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center flex-shrink-0 hover:bg-emerald-500 transition-colors"
+                >
                   <User className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
+                </button>
+                <button
+                  onClick={() => navigate('/profile')}
+                  className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
+                >
                   <p className="font-medium text-sm truncate">
-                    {user?.displayName || user?.email || 'Guest'}
+                    {serverDisplayName || user?.displayName || 'Set Display Name'}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
                     {user?.isAnonymous ? 'Guest' : user?.email}
                   </p>
-                </div>
+                </button>
+                <button
+                  onClick={() => navigate('/profile')}
+                  className="btn btn-secondary p-2 flex-shrink-0"
+                  title="Profile Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
                 <button
                   onClick={signOut}
                   className="btn btn-secondary p-2 flex-shrink-0"

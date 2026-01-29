@@ -4,7 +4,7 @@ import { firebaseService } from '../services/firebase';
 import { socketService, onLobbyState, onLobbyList, onGameState, onAuthSuccess, onError } from '../services/socket';
 import { bleService, DartHit } from '../services/ble';
 import { getAuthErrorMessage } from '../utils/authErrors';
-import type { Lobby, GameState, GameType, GameOptions } from '../types';
+import type { Lobby, GameState, GameType, GameOptions, TeamMode, TeamConfig } from '../types';
 
 interface GameStore {
   // Auth state
@@ -56,6 +56,9 @@ interface GameStore {
   removeGuest: (guestId: string) => void;
   setReady: (ready: boolean) => void;
   updateOptions: (options: Partial<GameOptions>, gameType?: GameType) => void;
+  setTeamMode: (teamMode: TeamMode, teamConfig?: TeamConfig) => void;
+  assignTeam: (playerId: string, teamId: string) => void;
+  setDisplayName: (displayName: string) => void;
   startGame: () => void;
 
   sendThrow: (multiplier: string, value: number, points: number) => void;
@@ -269,6 +272,18 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     updateOptions: (options, gameType) => {
       socketService.updateLobbyOptions(options, gameType);
+    },
+
+    setTeamMode: (teamMode, teamConfig) => {
+      socketService.setTeamMode(teamMode, teamConfig);
+    },
+
+    assignTeam: (playerId, teamId) => {
+      socketService.assignTeam(playerId, teamId);
+    },
+
+    setDisplayName: (displayName) => {
+      socketService.setDisplayName(displayName);
     },
 
     startGame: () => {

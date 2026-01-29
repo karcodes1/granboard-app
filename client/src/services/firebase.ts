@@ -62,6 +62,13 @@ export const firebaseService = {
     return user.getIdToken();
   },
 
+  // Update display name
+  async updateDisplayName(displayName: string): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('No user signed in');
+    await updateProfile(user, { displayName });
+  },
+
   // Subscribe to auth state changes
   onAuthStateChanged(callback: (user: User | null) => void): () => void {
     return onAuthStateChanged(auth, callback);
