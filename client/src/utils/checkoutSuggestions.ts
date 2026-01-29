@@ -181,3 +181,70 @@ export function getCheckoutSuggestion(score: number, dartsRemaining: number): st
 export function isCheckoutPossible(score: number): boolean {
   return score >= 2 && score <= 170 && checkouts[score] !== undefined;
 }
+
+// Get darts needed to reach a specific target score from current score
+// Used for Gotcha game to show how to hit opponent's score
+export function getGotchaSuggestion(currentScore: number, targetScore: number, dartsRemaining: number): string[] | null {
+  const needed = targetScore - currentScore;
+  if (needed <= 0 || needed > 180) return null; // Can't score more than 180 in one turn
+  if (dartsRemaining <= 0) return null;
+  
+  // Single dart solutions (1-60 points)
+  if (dartsRemaining >= 1) {
+    // Check for single dart hit
+    if (needed === 50) return ['DB'];
+    if (needed === 25) return ['SB'];
+    if (needed <= 20) return [`S${needed}`];
+    if (needed <= 40 && needed % 2 === 0) return [`D${needed / 2}`];
+    if (needed <= 60 && needed % 3 === 0) return [`T${needed / 3}`];
+  }
+  
+  // Two dart solutions
+  if (dartsRemaining >= 2 && needed <= 120) {
+    // Try T20 + something
+    if (needed > 60) {
+      const remainder = needed - 60;
+      if (remainder === 50) return ['T20', 'DB'];
+      if (remainder === 25) return ['T20', 'SB'];
+      if (remainder <= 20) return ['T20', `S${remainder}`];
+      if (remainder <= 40 && remainder % 2 === 0) return ['T20', `D${remainder / 2}`];
+      if (remainder <= 60 && remainder % 3 === 0) return ['T20', `T${remainder / 3}`];
+    }
+    // Try simpler two-dart combos
+    if (needed <= 40) {
+      const half = Math.floor(needed / 2);
+      if (half <= 20) return [`S${half}`, `S${needed - half}`];
+    }
+  }
+  
+  // Three dart solutions  
+  if (dartsRemaining >= 3 && needed <= 180) {
+    // T20 + T20 + remainder
+    if (needed > 120) {
+      const remainder = needed - 120;
+      if (remainder === 50) return ['T20', 'T20', 'DB'];
+      if (remainder === 25) return ['T20', 'T20', 'SB'];
+      if (remainder <= 20) return ['T20', 'T20', `S${remainder}`];
+      if (remainder <= 40 && remainder % 2 === 0) return ['T20', 'T20', `D${remainder / 2}`];
+      if (remainder <= 60 && remainder % 3 === 0) return ['T20', 'T20', `T${remainder / 3}`];
+    }
+    // T20 + something + something
+    if (needed > 60 && needed <= 120) {
+      const afterT20 = needed - 60;
+      // Try T20 + T-something + S-something
+      for (let t = 20; t >= 1; t--) {
+        const tVal = t * 3;
+        if (tVal <= afterT20) {
+          const rem = afterT20 - tVal;
+          if (rem === 0) return ['T20', `T${t}`];
+          if (rem === 50) return ['T20', `T${t}`, 'DB'];
+          if (rem === 25) return ['T20', `T${t}`, 'SB'];
+          if (rem <= 20) return ['T20', `T${t}`, `S${rem}`];
+          if (rem <= 40 && rem % 2 === 0) return ['T20', `T${t}`, `D${rem / 2}`];
+        }
+      }
+    }
+  }
+  
+  return null;
+}

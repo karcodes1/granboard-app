@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import { Target, Undo2, SkipForward, Trophy, ArrowLeft, RotateCcw, Home, Video, Maximize } from 'lucide-react';
 import { VideoChat } from '../components/VideoChat';
-import { ZeroOneGame, TicTacToeGame, CricketGame } from '../components/games';
+import { ZeroOneGame, TicTacToeGame, CricketGame, GotchaGame } from '../components/games';
 import type { GameState, PlayerGameState } from '../types';
 
 export function GamePage() {
@@ -217,6 +217,10 @@ function GameContent({ gameState, currentPlayer, dartsRemaining, isZeroOneGame }
         dartsRemaining={dartsRemaining}
       />
     );
+  }
+
+  if (gameState.gameType === 'gotcha') {
+    return <GotchaGame gameState={gameState} currentPlayer={currentPlayer} />;
   }
 
   if (gameState.gameType === 'tictactoe') {

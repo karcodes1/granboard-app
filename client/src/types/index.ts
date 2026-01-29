@@ -32,7 +32,7 @@ export interface Team {
 }
 
 export type PlayerType = 'authenticated' | 'guest';
-export type GameType = '501' | '301' | 'cricket' | 'tictactoe';
+export type GameType = '501' | '301' | 'gotcha' | 'cricket' | 'tictactoe';
 export type DartMultiplier = 'S' | 'D' | 'T' | 'SB' | 'DB' | 'OUT';
 
 export interface Player {

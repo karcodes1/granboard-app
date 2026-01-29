@@ -55,7 +55,7 @@ export interface DartThrow {
 }
 
 // Game types
-export type GameType = '501' | '301' | 'cricket' | 'tictactoe';
+export type GameType = '501' | '301' | 'gotcha' | 'cricket' | 'tictactoe';
 
 export interface GameOptions {
   startingScore?: number;
@@ -198,6 +198,7 @@ export type GameEventType =
   | 'UNDO_ROUND'
   | 'END_TURN'
   | 'BUST'
+  | 'GOTCHA'
   | 'CHECKOUT'
   | 'LEG_WON'
   | 'SET_WON'

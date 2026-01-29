@@ -31,6 +31,7 @@ export interface GameTeamInfo {
 const DEFAULT_OPTIONS: Record<GameType, GameOptions> = {
   '501': { startingScore: 501, doubleIn: false, doubleOut: true, legs: 1, sets: 1 },
   '301': { startingScore: 301, doubleIn: false, doubleOut: true, legs: 1, sets: 1 },
+  'gotcha': { startingScore: 301, doubleIn: false, doubleOut: true, legs: 1, sets: 1 },
   'cricket': { pointsToClose: 3 },
   'tictactoe': { marksToWin: 4 },
 };
@@ -68,12 +69,18 @@ export class GameEngine {
     let firstPlayerId: PlayerId;
 
     if (teamInfo.teamMode === 'teams' && teamInfo.teams) {
+      // Gotcha starts at 0 and goes up; 501/301 start at target and go down
+      const getTeamStartingScore = () => {
+        if (gameType === 'gotcha') return 0;
+        if (gameType === '501' || gameType === '301') return mergedOptions.startingScore || 501;
+        return 0;
+      };
       teams = teamInfo.teams.map(t => ({
         teamId: t.teamId,
         name: t.name,
         colorId: t.colorId,
         playerIds: t.playerIds,
-        score: gameType === '501' || gameType === '301' ? (mergedOptions.startingScore || 501) : 0,
+        score: getTeamStartingScore(),
         legsWon: 0,
         setsWon: 0,
         hasDoubledIn: !mergedOptions.doubleIn,
@@ -127,9 +134,10 @@ export class GameEngine {
     gameType: GameType,
     options: GameOptions
   ): PlayerGameState {
+    // 501/301 start at target and count down; gotcha starts at 0 and counts up
     const startingScore = gameType === '501' || gameType === '301' 
       ? (options.startingScore || 501) 
-      : 0;
+      : 0; // gotcha, cricket, tictactoe start at 0
 
     return {
       playerId: player.id,
@@ -244,6 +252,8 @@ export class GameEngine {
       case '501':
       case '301':
         return this.process501Throw(playerId, dartThrow);
+      case 'gotcha':
+        return this.processGotchaThrow(playerId, dartThrow);
       case 'cricket':
         return this.processCricketThrow(playerId, dartThrow);
       case 'tictactoe':
@@ -318,6 +328,141 @@ export class GameEngine {
   private getPlayerTeam(playerId: PlayerId): TeamGameState | null {
     if (!this.state.teams) return null;
     return this.state.teams.find(t => t.playerIds.includes(playerId)) || null;
+  }
+
+  // Gotcha: 301 variant where scores go UP. Hit opponent's exact score = they go to 0. Bust = go to 201.
+  private processGotchaThrow(playerId: PlayerId, dart: DartThrow): {
+    success: boolean;
+    bust: boolean;
+    checkout: boolean;
+    message?: string;
+  } {
+    const playerState = this.state.players[playerId];
+    const options = this.state.options;
+    const isTeamMode = this.state.teamMode === 'teams' && this.state.teams;
+    const team = isTeamMode ? this.getPlayerTeam(playerId) : null;
+    const targetScore = options.startingScore || 301;
+    const bustResetScore = targetScore - 100; // 201 for 301
+
+    // Get current score (team score in team mode, player score in FFA)
+    const currentScore = team ? team.score : playerState.score;
+    const hasDoubledIn = team ? team.hasDoubledIn : playerState.hasDoubledIn;
+
+    // Check double-in requirement
+    if (options.doubleIn && !hasDoubledIn) {
+      if (dart.multiplier === 'D' || dart.multiplier === 'DB') {
+        if (team) {
+          team.hasDoubledIn = true;
+        } else {
+          playerState.hasDoubledIn = true;
+        }
+      } else {
+        // Non-scoring throw until doubled in
+        this.addThrowToState(playerId, { ...dart, points: 0 });
+        return { success: true, bust: false, checkout: false, message: 'Must double in' };
+      }
+    }
+
+    const newScore = currentScore + dart.points; // Gotcha scores go UP
+
+    // Check for bust (went over target score)
+    if (newScore > targetScore) {
+      // Bust in Gotcha: go back to 201 (or 2/3 of target)
+      if (team) {
+        team.score = bustResetScore;
+      } else {
+        playerState.score = bustResetScore;
+      }
+      playerState.stats.busts++;
+      this.state.turn.isBust = true;
+      this.addThrowToState(playerId, dart);
+
+      this.addEvent({
+        type: 'BUST',
+        playerId,
+        data: { resetScore: bustResetScore },
+      });
+
+      // End turn after bust
+      this.endTurn(playerId);
+      return { success: true, bust: true, checkout: false, message: `Bust! Back to ${bustResetScore}` };
+    }
+
+    // Check for "gotcha" - hitting exact score of opponent
+    let gotchaVictim: string | null = null;
+    if (isTeamMode && this.state.teams) {
+      // Check if we hit another team's exact score
+      for (const otherTeam of this.state.teams) {
+        if (otherTeam.teamId !== team?.teamId && otherTeam.score === newScore && newScore !== bustResetScore) {
+          // Gotcha! Reset opponent team to 0 (but keep hasDoubledIn - they already doubled in)
+          otherTeam.score = 0;
+          gotchaVictim = otherTeam.name;
+          this.addEvent({
+            type: 'GOTCHA',
+            playerId,
+            data: { victimTeamId: otherTeam.teamId, victimName: otherTeam.name },
+          });
+        }
+      }
+    } else {
+      // FFA mode - check all other players
+      for (const otherId of this.state.playerOrder) {
+        if (otherId !== playerId) {
+          const otherPlayer = this.state.players[otherId];
+          if (otherPlayer.score === newScore && newScore !== bustResetScore) {
+            // Gotcha! Reset opponent to 0 (but keep hasDoubledIn - they already doubled in)
+            otherPlayer.score = 0;
+            gotchaVictim = otherPlayer.displayName;
+            this.addEvent({
+              type: 'GOTCHA',
+              playerId,
+              data: { victimPlayerId: otherId, victimName: otherPlayer.displayName },
+            });
+          }
+        }
+      }
+    }
+
+    // Update score (team or player)
+    if (team) {
+      team.score = newScore;
+    } else {
+      playerState.score = newScore;
+    }
+    this.addThrowToState(playerId, dart);
+
+    // Check for checkout (reached exactly target score)
+    if (newScore === targetScore) {
+      // Check double-out requirement
+      if (options.doubleOut && dart.multiplier !== 'D' && dart.multiplier !== 'DB') {
+        // Must checkout on a double - treat as bust
+        if (team) {
+          team.score = bustResetScore;
+        } else {
+          playerState.score = bustResetScore;
+        }
+        playerState.stats.busts++;
+        this.state.turn.isBust = true;
+        this.addEvent({
+          type: 'BUST',
+          playerId,
+          data: { resetScore: bustResetScore, reason: 'Must checkout on double' },
+        });
+        this.endTurn(playerId);
+        return { success: true, bust: true, checkout: false, message: 'Must checkout on double!' };
+      }
+      return this.handleCheckout(playerId);
+    }
+
+    // Auto end turn if 3 darts thrown
+    if (playerState.roundThrows.length >= 3) {
+      this.endTurn(playerId);
+    }
+
+    if (gotchaVictim) {
+      return { success: true, bust: false, checkout: false, message: `GOTCHA! ${gotchaVictim} reset to 0!` };
+    }
+    return { success: true, bust: false, checkout: false };
   }
 
   private processCricketThrow(playerId: PlayerId, dart: DartThrow): {

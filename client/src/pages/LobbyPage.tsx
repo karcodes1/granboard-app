@@ -8,6 +8,7 @@ import { PLAYER_COLORS } from '../types';
 const GAME_TYPES: { id: GameType; name: string; desc: string; color: string }[] = [
   { id: '501', name: '501', desc: 'Classic', color: 'bg-emerald-600' },
   { id: '301', name: '301', desc: 'Quick', color: 'bg-blue-600' },
+  { id: 'gotcha', name: 'Gotcha', desc: 'Kill mode', color: 'bg-amber-600' },
   { id: 'cricket', name: 'Cricket', desc: 'Close out', color: 'bg-red-600' },
   { id: 'tictactoe', name: 'TicTacToe', desc: 'Claim squares', color: 'bg-purple-600' },
 ];
@@ -104,9 +105,12 @@ export function LobbyPage() {
   const canStart = isOwner && allReady && (currentLobby?.players.length ?? 0) >= 2;
 
   const handleGameTypeChange = (gameType: GameType) => {
-    const options: GameOptions = gameType === '501' || gameType === '301'
-      ? { startingScore: gameType === '501' ? 501 : 301, doubleOut: true, doubleIn: false, legs: 1, sets: 1 }
-      : {};
+    let options: GameOptions = {};
+    if (gameType === '501' || gameType === '301') {
+      options = { startingScore: gameType === '501' ? 501 : 301, doubleOut: true, doubleIn: false, legs: 1, sets: 1 };
+    } else if (gameType === 'gotcha') {
+      options = { startingScore: 301, doubleOut: true, doubleIn: false, legs: 1, sets: 1 };
+    }
     updateOptions(options, gameType);
   };
 
@@ -118,7 +122,7 @@ export function LobbyPage() {
     updateOptions(newOptions);
   };
 
-  const isZeroOneGame = currentLobby?.gameType === '501' || currentLobby?.gameType === '301';
+  const isZeroOneGame = currentLobby?.gameType === '501' || currentLobby?.gameType === '301' || currentLobby?.gameType === 'gotcha';
 
   // Browse Lobbies View - viewport fit
   if (!currentLobby) {
