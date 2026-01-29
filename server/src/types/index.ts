@@ -263,6 +263,27 @@ export interface ClientSession {
   guestPlayers: Player[];
 }
 
+// Active game session for persistence (stored in Firestore)
+export interface ActiveGameSession {
+  gameId: GameId;
+  lobbyId: LobbyId;
+  gameType: GameType;
+  connectedUserIds: string[]; // Firebase UIDs of connected clients
+  disconnectedUserIds: string[]; // Users who have disconnected but can reconnect
+  playerDisplayNames: Record<string, string>; // userId -> displayName
+  createdAt: number;
+  updatedAt: number;
+  status: 'active' | 'paused' | 'finished';
+}
+
+// User's active game reference (stored in users collection)
+export interface UserActiveGame {
+  gameId: GameId;
+  lobbyId: LobbyId;
+  gameType: GameType;
+  joinedAt: number;
+}
+
 // Agora
 export interface AgoraTokenRequest {
   channelName: string;

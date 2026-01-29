@@ -180,3 +180,135 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     return null;
   }
 }
+
+// Active game session types
+export interface ActiveGameSession {
+  gameId: string;
+  lobbyId: string;
+  gameType: string;
+  connectedUserIds: string[];
+  disconnectedUserIds: string[];
+  playerDisplayNames: Record<string, string>;
+  createdAt: number;
+  updatedAt: number;
+  status: 'active' | 'paused' | 'finished';
+}
+
+export interface UserActiveGame {
+  gameId: string;
+  lobbyId: string;
+  gameType: string;
+  joinedAt: number;
+}
+
+// Save active game session when game starts
+export async function saveActiveGameSession(session: ActiveGameSession): Promise<void> {
+  const db = getFirestore();
+  const docRef = db.collection('activeGames').doc(session.gameId);
+
+  try {
+    await docRef.set(session);
+    console.log(`[Firebase] Saved active game session ${session.gameId}`);
+  } catch (error) {
+    console.error('[Firebase] Failed to save active game session:', error);
+  }
+}
+
+// Get active game session
+export async function getActiveGameSession(gameId: string): Promise<ActiveGameSession | null> {
+  const db = getFirestore();
+  const docRef = db.collection('activeGames').doc(gameId);
+
+  try {
+    const doc = await docRef.get();
+    return doc.exists ? doc.data() as ActiveGameSession : null;
+  } catch (error) {
+    console.error('[Firebase] Failed to get active game session:', error);
+    return null;
+  }
+}
+
+// Update active game session (e.g., when player disconnects/reconnects)
+export async function updateActiveGameSession(
+  gameId: string,
+  updates: Partial<ActiveGameSession>
+): Promise<void> {
+  const db = getFirestore();
+  const docRef = db.collection('activeGames').doc(gameId);
+
+  try {
+    await docRef.update({
+      ...updates,
+      updatedAt: Date.now(),
+    });
+    console.log(`[Firebase] Updated active game session ${gameId}`);
+  } catch (error) {
+    console.error('[Firebase] Failed to update active game session:', error);
+  }
+}
+
+// Delete active game session when game ends
+export async function deleteActiveGameSession(gameId: string): Promise<void> {
+  const db = getFirestore();
+  const docRef = db.collection('activeGames').doc(gameId);
+
+  try {
+    await docRef.delete();
+    console.log(`[Firebase] Deleted active game session ${gameId}`);
+  } catch (error) {
+    console.error('[Firebase] Failed to delete active game session:', error);
+  }
+}
+
+// Set user's active game reference
+export async function setUserActiveGame(userId: string, game: UserActiveGame | null): Promise<void> {
+  const db = getFirestore();
+  const docRef = db.collection('users').doc(userId);
+
+  try {
+    if (game) {
+      await docRef.set({ activeGame: game }, { merge: true });
+    } else {
+      await docRef.update({ activeGame: admin.firestore.FieldValue.delete() });
+    }
+    console.log(`[Firebase] Updated active game for user ${userId}`);
+  } catch (error) {
+    console.error('[Firebase] Failed to update user active game:', error);
+  }
+}
+
+// Get user's active game reference
+export async function getUserActiveGame(userId: string): Promise<UserActiveGame | null> {
+  const db = getFirestore();
+  const docRef = db.collection('users').doc(userId);
+
+  try {
+    const doc = await docRef.get();
+    if (doc.exists) {
+      const data = doc.data();
+      return data?.activeGame || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('[Firebase] Failed to get user active game:', error);
+    return null;
+  }
+}
+
+// Clear active game for all users in a game
+export async function clearActiveGameForUsers(userIds: string[]): Promise<void> {
+  const db = getFirestore();
+  const batch = db.batch();
+
+  for (const userId of userIds) {
+    const docRef = db.collection('users').doc(userId);
+    batch.update(docRef, { activeGame: admin.firestore.FieldValue.delete() });
+  }
+
+  try {
+    await batch.commit();
+    console.log(`[Firebase] Cleared active game for ${userIds.length} users`);
+  } catch (error) {
+    console.error('[Firebase] Failed to clear active game for users:', error);
+  }
+}

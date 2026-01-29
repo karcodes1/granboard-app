@@ -1,10 +1,21 @@
 import { create } from 'zustand';
 import { User } from 'firebase/auth';
 import { firebaseService } from '../services/firebase';
-import { socketService, onLobbyState, onLobbyList, onGameState, onAuthSuccess, onError } from '../services/socket';
+import {
+  socketService,
+  onLobbyState,
+  onLobbyList,
+  onGameState,
+  onAuthSuccess,
+  onError,
+  onActiveGame,
+  onPlayerDisconnected,
+  onPlayerReconnected,
+  onReconnectError,
+} from '../services/socket';
 import { bleService, DartHit } from '../services/ble';
 import { getAuthErrorMessage } from '../utils/authErrors';
-import type { Lobby, GameState, GameType, GameOptions, TeamMode, TeamConfig } from '../types';
+import type { Lobby, GameState, GameType, GameOptions, TeamMode, TeamConfig, UserActiveGame, DisconnectedPlayer } from '../types';
 
 interface GameStore {
   // Auth state
@@ -30,6 +41,10 @@ interface GameStore {
 
   // Game state
   gameState: GameState | null;
+
+  // Active game state (for reconnection)
+  activeGame: UserActiveGame | null;
+  disconnectedPlayers: DisconnectedPlayer[];
 
   // Error state
   error: string | null;
@@ -66,6 +81,11 @@ interface GameStore {
   undoThrow: () => void;
   undoRound: () => void;
   requestRematch: () => void;
+
+  // Active game actions
+  fetchActiveGame: () => void;
+  reconnectToGame: (gameId: string, lobbyId: string) => void;
+  leaveGame: () => void;
 
   clearError: () => void;
 }
@@ -106,6 +126,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     currentLobby: null,
     availableLobbies: [],
     gameState: null,
+    activeGame: null,
+    disconnectedPlayers: [],
     error: null,
 
     // Initialize app
@@ -152,6 +174,35 @@ export const useGameStore = create<GameStore>((set, get) => {
       socketUnsubscribes.push(
         onError(({ message }) => {
           set({ error: message });
+        }),
+      );
+
+      // Active game event listeners
+      socketUnsubscribes.push(
+        onActiveGame(({ activeGame }) => {
+          set({ activeGame });
+        }),
+      );
+
+      socketUnsubscribes.push(
+        onPlayerDisconnected(({ playerId, displayName }) => {
+          set((state) => ({
+            disconnectedPlayers: [...state.disconnectedPlayers, { playerId, displayName }],
+          }));
+        }),
+      );
+
+      socketUnsubscribes.push(
+        onPlayerReconnected(({ playerId }) => {
+          set((state) => ({
+            disconnectedPlayers: state.disconnectedPlayers.filter(p => p.playerId !== playerId),
+          }));
+        }),
+      );
+
+      socketUnsubscribes.push(
+        onReconnectError(({ message }) => {
+          set({ error: message, activeGame: null });
         }),
       );
     },
@@ -309,6 +360,20 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     requestRematch: () => {
       socketService.requestRematch();
+    },
+
+    // Active game actions
+    fetchActiveGame: () => {
+      socketService.getActiveGame();
+    },
+
+    reconnectToGame: (gameId, lobbyId) => {
+      socketService.reconnectGame(gameId, lobbyId);
+    },
+
+    leaveGame: () => {
+      socketService.leaveGame();
+      set({ currentLobby: null, gameState: null, activeGame: null, disconnectedPlayers: [] });
     },
 
     clearError: () => {

@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { firebaseService } from './firebase';
-import type { Lobby, GameState, GameType, GameOptions, AgoraTokenResponse, TeamMode, TeamConfig } from '../types';
+import type { Lobby, GameState, GameType, GameOptions, AgoraTokenResponse, TeamMode, TeamConfig, UserActiveGame } from '../types';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
 
@@ -46,6 +46,11 @@ class SocketService {
       'ERROR',
       'PLAYER_JOINED',
       'PLAYER_LEFT',
+      'ACTIVE_GAME',
+      'PLAYER_DISCONNECTED',
+      'PLAYER_RECONNECTED',
+      'PLAYER_LEFT_GAME',
+      'RECONNECT_ERROR',
     ];
 
     for (const event of serverEvents) {
@@ -185,6 +190,19 @@ class SocketService {
     this.socket?.emit('REQUEST_AGORA_TOKEN', { channelName, uid });
   }
 
+  // Active game management
+  getActiveGame(): void {
+    this.socket?.emit('GET_ACTIVE_GAME');
+  }
+
+  reconnectGame(gameId: string, lobbyId: string): void {
+    this.socket?.emit('RECONNECT_GAME', { gameId, lobbyId });
+  }
+
+  leaveGame(): void {
+    this.socket?.emit('LEAVE_GAME');
+  }
+
   // Check if connected
   isConnected(): boolean {
     return this.socket?.connected ?? false;
@@ -216,4 +234,20 @@ export function onAuthSuccess(callback: (data: { userId: string; displayName: st
 
 export function onError(callback: (data: { message: string }) => void): () => void {
   return socketService.on('ERROR', callback);
+}
+
+export function onActiveGame(callback: (data: { activeGame: UserActiveGame | null }) => void): () => void {
+  return socketService.on('ACTIVE_GAME', callback);
+}
+
+export function onPlayerDisconnected(callback: (data: { playerId: string; displayName: string }) => void): () => void {
+  return socketService.on('PLAYER_DISCONNECTED', callback);
+}
+
+export function onPlayerReconnected(callback: (data: { playerId: string; displayName: string }) => void): () => void {
+  return socketService.on('PLAYER_RECONNECTED', callback);
+}
+
+export function onReconnectError(callback: (data: { message: string }) => void): () => void {
+  return socketService.on('RECONNECT_ERROR', callback);
 }

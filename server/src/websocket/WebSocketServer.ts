@@ -1,6 +1,18 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
-import { verifyIdToken, getUserProfile, saveUserProfile } from '../auth/FirebaseAuth.js';
+import {
+  verifyIdToken,
+  getUserProfile,
+  saveUserProfile,
+  saveActiveGameSession,
+  updateActiveGameSession,
+  deleteActiveGameSession,
+  setUserActiveGame,
+  getUserActiveGame,
+  clearActiveGameForUsers,
+  ActiveGameSession,
+  UserActiveGame,
+} from '../auth/FirebaseAuth.js';
 import { lobbyManager } from '../lobby/LobbyManager.js';
 import { agoraTokenService } from '../services/AgoraTokenService.js';
 import {
@@ -114,6 +126,26 @@ export class WebSocketServer {
       // Agora token request
       socket.on('REQUEST_AGORA_TOKEN', (data: { channelName: string; uid?: number }) => {
         this.handleAgoraTokenRequest(socket, data.channelName, data.uid);
+      });
+
+      // Get user's active game
+      socket.on('GET_ACTIVE_GAME', () => {
+        this.handleGetActiveGame(socket);
+      });
+
+      // Reconnect to active game
+      socket.on('RECONNECT_GAME', (data: { gameId: string; lobbyId: string }) => {
+        this.handleReconnectGame(socket, data.gameId, data.lobbyId);
+      });
+
+      // Leave/abandon current game
+      socket.on('LEAVE_GAME', () => {
+        this.handleLeaveGame(socket);
+      });
+
+      // Rematch (restarting game from finished state)
+      socket.on('REQUEST_REMATCH', () => {
+        this.handleRequestRematch(socket);
       });
 
       // Disconnect
@@ -442,7 +474,7 @@ export class WebSocketServer {
     }
   }
 
-  private handleStartGame(socket: Socket): void {
+  private async handleStartGame(socket: Socket): Promise<void> {
     const session = this.getSession(socket);
     if (!session || !session.currentLobbyId) return;
 
@@ -454,17 +486,65 @@ export class WebSocketServer {
       }
 
       const { lobby, game } = result;
-      session.currentGameId = game.getGameId();
+      const gameId = game.getGameId();
+      const lobbyRoom = `lobby:${session.currentLobbyId}`;
+      const gameRoom = `game:${gameId}`;
+
+      // Get all authenticated user IDs from the lobby
+      const authenticatedUserIds = lobby.players
+        .filter(p => p.type === 'authenticated')
+        .map(p => p.id);
+
+      // Build player display names map
+      const playerDisplayNames: Record<string, string> = {};
+      for (const player of lobby.players) {
+        playerDisplayNames[player.id] = player.displayName;
+      }
+
+      // Save active game session to Firestore
+      const activeGameSession: ActiveGameSession = {
+        gameId,
+        lobbyId: lobby.lobbyId,
+        gameType: lobby.gameType,
+        connectedUserIds: authenticatedUserIds,
+        disconnectedUserIds: [],
+        playerDisplayNames,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        status: 'active',
+      };
+      await saveActiveGameSession(activeGameSession);
+
+      // Set active game reference for each authenticated user
+      const userActiveGame: UserActiveGame = {
+        gameId,
+        lobbyId: lobby.lobbyId,
+        gameType: lobby.gameType,
+        joinedAt: Date.now(),
+      };
+      for (const userId of authenticatedUserIds) {
+        await setUserActiveGame(userId, userActiveGame);
+      }
+
+      // Update currentGameId for all sessions in this lobby
+      const socketsInLobby = this.io.sockets.adapter.rooms.get(lobbyRoom);
+      if (socketsInLobby) {
+        for (const socketId of socketsInLobby) {
+          const playerSession = this.sessions.get(socketId);
+          if (playerSession) {
+            playerSession.currentGameId = gameId;
+          }
+        }
+      }
 
       // Move all sockets to game room
-      const gameRoom = `game:${game.getGameId()}`;
-      this.io.to(`lobby:${session.currentLobbyId}`).socketsJoin(gameRoom);
+      this.io.to(lobbyRoom).socketsJoin(gameRoom);
 
       // Broadcast game state
       this.io.to(gameRoom).emit('GAME_STATE', { state: game.getState() });
-      this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby });
+      this.io.to(lobbyRoom).emit('LOBBY_STATE', { lobby });
 
-      console.log(`[WebSocket] Game started: ${game.getGameId()}`);
+      console.log(`[WebSocket] Game started: ${gameId}`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to start game';
       socket.emit('GAME_ERROR', { message });
@@ -604,11 +684,182 @@ export class WebSocketServer {
     }
   }
 
-  private handleDisconnect(socket: Socket): void {
+  private async handleGetActiveGame(socket: Socket): Promise<void> {
+    const session = this.getSession(socket);
+    if (!session) return;
+
+    try {
+      const activeGame = await getUserActiveGame(session.userId);
+      socket.emit('ACTIVE_GAME', { activeGame });
+    } catch (error) {
+      console.error('[WebSocket] Error getting active game:', error);
+      socket.emit('ACTIVE_GAME', { activeGame: null });
+    }
+  }
+
+  private async handleReconnectGame(socket: Socket, gameId: string, lobbyId: string): Promise<void> {
+    const session = this.getSession(socket);
+    if (!session) return;
+
+    try {
+      const game = lobbyManager.getGame(gameId);
+      const lobby = lobbyManager.getLobby(lobbyId);
+
+      if (!game || !lobby) {
+        // Game no longer exists, clear user's active game
+        await setUserActiveGame(session.userId, null);
+        socket.emit('RECONNECT_ERROR', { message: 'Game no longer exists' });
+        return;
+      }
+
+      // Update session
+      session.currentLobbyId = lobbyId;
+      session.currentGameId = gameId;
+
+      // Join rooms
+      socket.join(`lobby:${lobbyId}`);
+      socket.join(`game:${gameId}`);
+
+      // Update active game session - move from disconnected to connected
+      await updateActiveGameSession(gameId, {
+        connectedUserIds: [...new Set([...(lobby.players.map(p => p.ownerUserId)), session.userId])],
+        disconnectedUserIds: [],
+      });
+
+      // Notify other players that user reconnected
+      this.io.to(`game:${gameId}`).emit('PLAYER_RECONNECTED', {
+        playerId: session.userId,
+        displayName: session.displayName,
+      });
+
+      // Send current state to reconnecting player
+      socket.emit('LOBBY_STATE', { lobby });
+      socket.emit('GAME_STATE', { state: game.getState() });
+
+      console.log(`[WebSocket] User ${session.userId} reconnected to game ${gameId}`);
+    } catch (error) {
+      console.error('[WebSocket] Error reconnecting to game:', error);
+      socket.emit('RECONNECT_ERROR', { message: 'Failed to reconnect' });
+    }
+  }
+
+  private async handleLeaveGame(socket: Socket): Promise<void> {
+    const session = this.getSession(socket);
+    if (!session) return;
+
+    try {
+      // Clear user's active game
+      await setUserActiveGame(session.userId, null);
+
+      // Leave game room if in one
+      if (session.currentGameId) {
+        socket.leave(`game:${session.currentGameId}`);
+        
+        // Notify others
+        this.io.to(`game:${session.currentGameId}`).emit('PLAYER_LEFT_GAME', {
+          playerId: session.userId,
+          displayName: session.displayName,
+        });
+      }
+
+      // Leave lobby
+      if (session.currentLobbyId) {
+        const lobby = lobbyManager.leaveLobby(session.currentLobbyId, session.userId);
+        socket.leave(`lobby:${session.currentLobbyId}`);
+        
+        if (lobby) {
+          this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby });
+        }
+      }
+
+      session.currentGameId = undefined;
+      session.currentLobbyId = undefined;
+
+      socket.emit('LOBBY_STATE', { lobby: null });
+      socket.emit('GAME_STATE', { state: null });
+
+      console.log(`[WebSocket] User ${session.userId} left game`);
+    } catch (error) {
+      console.error('[WebSocket] Error leaving game:', error);
+    }
+  }
+
+  private handleRequestRematch(socket: Socket): void {
+    const session = this.getSession(socket);
+    if (!session || !session.currentLobbyId) return;
+
+    const lobby = lobbyManager.getLobby(session.currentLobbyId);
+    if (!lobby) return;
+
+    // Only host can request rematch
+    if (lobby.ownerUserId !== session.userId) {
+      socket.emit('ERROR', { message: 'Only host can start rematch' });
+      return;
+    }
+
+    try {
+      // Reset lobby status to waiting
+      lobby.status = 'waiting';
+      lobby.gameId = undefined;
+      lobby.updatedAt = Date.now();
+
+      // Reset all players ready status
+      for (const player of lobby.players) {
+        player.isReady = player.id === lobby.ownerUserId;
+      }
+
+      // Clear game references
+      if (session.currentGameId) {
+        // Delete old active game session
+        deleteActiveGameSession(session.currentGameId).catch(console.error);
+      }
+
+      // Clear game ID from all sessions in lobby
+      const lobbyRoom = `lobby:${session.currentLobbyId}`;
+      const socketsInLobby = this.io.sockets.adapter.rooms.get(lobbyRoom);
+      if (socketsInLobby) {
+        for (const socketId of socketsInLobby) {
+          const playerSession = this.sessions.get(socketId);
+          if (playerSession) {
+            playerSession.currentGameId = undefined;
+          }
+        }
+      }
+
+      this.io.to(lobbyRoom).emit('LOBBY_STATE', { lobby });
+      this.io.to(lobbyRoom).emit('GAME_STATE', { state: null });
+
+      console.log(`[WebSocket] Rematch requested for lobby ${session.currentLobbyId}`);
+    } catch (error) {
+      console.error('[WebSocket] Error requesting rematch:', error);
+    }
+  }
+
+  private async handleDisconnect(socket: Socket): Promise<void> {
     const session = this.sessions.get(socket.id);
     if (session) {
-      // Leave lobby if in one
-      if (session.currentLobbyId) {
+      // If in an active game, notify other players and mark as disconnected
+      if (session.currentGameId) {
+        const gameRoom = `game:${session.currentGameId}`;
+        
+        // Notify other players about disconnect
+        this.io.to(gameRoom).emit('PLAYER_DISCONNECTED', {
+          playerId: session.userId,
+          displayName: session.displayName,
+        });
+
+        // Update active game session to mark user as disconnected
+        try {
+          await updateActiveGameSession(session.currentGameId, {
+            disconnectedUserIds: [session.userId],
+          });
+        } catch (error) {
+          console.error('[WebSocket] Error updating active game session:', error);
+        }
+
+        console.log(`[WebSocket] User ${session.userId} disconnected from game ${session.currentGameId}`);
+      } else if (session.currentLobbyId) {
+        // Not in game, just in lobby - leave normally
         const lobby = lobbyManager.leaveLobby(session.currentLobbyId, session.userId);
         if (lobby) {
           this.io.to(`lobby:${session.currentLobbyId}`).emit('LOBBY_STATE', { lobby });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
-import { Target, Undo2, SkipForward, Trophy, ArrowLeft, RotateCcw, Home, Video, Maximize } from 'lucide-react';
+import { Target, Undo2, SkipForward, Trophy, ArrowLeft, RotateCcw, Home, Video, Maximize, Loader2 } from 'lucide-react';
 import { VideoChat } from '../components/VideoChat';
 import { ZeroOneGame, TicTacToeGame, CricketGame, GotchaGame } from '../components/games';
 import type { GameState, PlayerGameState } from '../types';
@@ -19,6 +19,7 @@ export function GamePage() {
     undoThrow,
     requestRematch,
     isBleConnected,
+    disconnectedPlayers,
   } = useGameStore();
 
   const isHost = currentLobby?.ownerUserId === serverUserId;
@@ -81,6 +82,10 @@ export function GamePage() {
     navigate('/');
   };
 
+  const handleMiss = () => {
+    sendThrow('OUT', 0, 0);
+  };
+
   const toggleFullscreen = async () => {
     try {
       if (!document.fullscreenElement) {
@@ -126,11 +131,30 @@ export function GamePage() {
     );
   }
 
+  // Disconnected players overlay
+  const hasDisconnectedPlayers = disconnectedPlayers.length > 0;
+
   return (
     <div
-      className="h-full flex flex-col overflow-hidden px-2"
+      className="h-full flex flex-col overflow-hidden px-2 relative"
       data-testid="game-page-root"
     >
+      {/* Disconnected Players Overlay */}
+      {hasDisconnectedPlayers && (
+        <div className="absolute inset-0 bg-black/70 z-50 flex items-center justify-center">
+          <div className="card p-6 text-center max-w-sm">
+            <Loader2 className="w-10 h-10 mx-auto text-amber-500 animate-spin mb-4" />
+            <h2 className="text-lg font-bold mb-2">Waiting for Player</h2>
+            <p className="text-sm text-gray-400 mb-3">
+              {disconnectedPlayers.map(p => p.displayName).join(', ')} disconnected
+            </p>
+            <p className="text-xs text-gray-500">
+              Game will resume when they reconnect...
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* MINI HEADER - just leave button, game type, and controls */}
       <div className="flex items-center justify-between py-1 px-1 flex-shrink-0 border-b border-gray-700">
         <button onClick={handleLeaveGame} className="text-gray-400 hover:text-white p-1">
@@ -182,6 +206,9 @@ export function GamePage() {
             <Target className="w-4 h-4 inline mr-1" /> Throw
           </button>
         )}
+        <button onClick={handleMiss} className="btn btn-secondary flex-1 py-2 text-sm">
+          <Target className="w-4 h-4 inline mr-1" /> Miss
+        </button>
         <button
           onClick={undoThrow}
           disabled={dartsThrown === 0}
@@ -191,7 +218,6 @@ export function GamePage() {
         </button>
         <button
           onClick={endTurn}
-          disabled={dartsThrown === 0}
           className="btn btn-secondary flex-1 py-2 text-sm"
         >
           <SkipForward className="w-4 h-4 inline mr-1" /> End

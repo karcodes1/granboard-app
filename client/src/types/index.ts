@@ -192,3 +192,17 @@ export interface DartHit {
   points: number;
   timestamp: number;
 }
+
+// User's active game reference
+export interface UserActiveGame {
+  gameId: string;
+  lobbyId: string;
+  gameType: GameType;
+  joinedAt: number;
+}
+
+// Disconnected player info
+export interface DisconnectedPlayer {
+  playerId: string;
+  displayName: string;
+}

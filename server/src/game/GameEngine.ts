@@ -240,10 +240,17 @@ export class GameEngine {
       return { success: false, bust: false, checkout: false, message: 'Turn already complete' };
     }
 
+    // For 01 games and gotcha, single bull scores 50 (same as double bull)
+    let adjustedDart = { ...dart };
+    if ((this.state.gameType === '501' || this.state.gameType === '301' || this.state.gameType === 'gotcha') 
+        && dart.multiplier === 'SB') {
+      adjustedDart.points = 50;
+    }
+
     // Create the dart throw with ID and timestamp
     const dartThrow: DartThrow = {
       id: uuidv4(),
-      ...dart,
+      ...adjustedDart,
       timestamp: Date.now(),
     };
 
